@@ -1,4 +1,5 @@
 # Htmlcompressor
+[![Build Status](https://travis-ci.org/paolochiodi/htmlcompressor.svg?branch=master)](https://travis-ci.org/paolochiodi/htmlcompressor)
 
 ## Put your html on a diet
 
@@ -77,6 +78,57 @@ The middleware uses a little more aggressive options by default:
 Rails 2.3 users may need to add
 ```ruby
   require 'htmlcompressor'
+```
+
+## CSS and JavaScript Compression
+
+By default CSS/JS compression is disabled.
+In order to minify in page javascript and css, you need to supply a compressor in the options hash.
+A compressor can be `:yui` or `:closure` or any object that responds to `:compress`. E.g.: `compressed = compressor.compress(source)`
+
+```ruby
+
+  class MyCompressor
+
+    def compress(source)
+      return 'minified'
+    end
+
+  end
+
+  options = {
+    :compress_css => true,
+    :css_compressor => MyCompressor.new,
+    :compress_javascript => true,
+    :javascript_compressor => MyCompressor.new
+  }
+
+```
+
+Please note that in order to use yui or closure compilers you need to manually add them to the Gemfile
+
+```ruby
+  gem 'yui-compressor'
+
+  ...
+
+  options = {
+    :compress_javscript => true,
+    :javascript_compressor => :yui,
+    :compress_css => true
+    :css_compressor => :yui
+  }
+```
+
+```ruby
+  gem 'closure-compiler'
+
+  ...
+
+  options = {
+    :compress_javascript => true,
+    :javascript_compressor => :closure
+  }
 ```
 
 ## Statistics

@@ -1,4 +1,4 @@
-require "yui/compressor"
+require "htmlcompressor/exceptions"
 
 module HtmlCompressor
   class Compressor
@@ -65,7 +65,7 @@ module HtmlCompressor
     TYPE_ATTR_PATTERN = Regexp.new("type\\s*=\\s*([\\\"']*)(.+?)\\1", Regexp::MULTILINE | Regexp::IGNORECASE)
     JS_TYPE_ATTR_PATTERN = Regexp.new("(<script[^>]*)type\\s*=\\s*([\"']*)(?:text|application)\/javascript\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
     JS_LANG_ATTR_PATTERN = Regexp.new("(<script[^>]*)language\\s*=\\s*([\"']*)javascript\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
-    STYLE_TYPE_ATTR_PATTERN = Regexp.new("(<style[^>]*)type\\s*=\\s*([\"']*)text/style\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
+    STYLE_TYPE_ATTR_PATTERN = Regexp.new("(<style[^>]*)type\\s*=\\s*([\"']*)text/(?:style|css)\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
     LINK_TYPE_ATTR_PATTERN = Regexp.new("(<link[^>]*)type\\s*=\\s*([\"']*)text/(?:css|plain)\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
     LINK_REL_ATTR_PATTERN = Regexp.new("<link(?:[^>]*)rel\\s*=\\s*([\"']*)(?:alternate\\s+)?stylesheet\\1(?:[^>]*)>", Regexp::MULTILINE | Regexp::IGNORECASE)
     FORM_METHOD_ATTR_PATTERN = Regexp.new("(<form[^>]*)method\\s*=\\s*([\"']*)get\\2([^>]*>)", Regexp::MULTILINE | Regexp::IGNORECASE)
@@ -92,6 +92,15 @@ module HtmlCompressor
     TEMP_SKIP_PATTERN = Regexp.new("%%%~COMPRESS~SKIP~(\\d+?)~%%%")
     TEMP_LINE_BREAK_PATTERN = Regexp.new("%%%~COMPRESS~LT~(\\d+?)~%%%")
 
+    JAVASCRIPT_COMPRESSORS_OPTIONS = {
+      :closure => { :compilation_level => 'ADVANCED_OPTIMIZATIONS' },
+      :yui => { :munge => true, :preserve_semicolons => true, :optimize => true, :line_break => nil }
+    }
+
+    CSS_COMPRESSORS_OPTIONS = {
+      :yui => { :line_break => -1 }
+    }
+
     DEFAULT_OPTIONS = {
       :enabled => true,
 
@@ -100,6 +109,8 @@ module HtmlCompressor
       :remove_multi_spaces => true,
 
       # optional settings
+      :javascript_compressor => :yui,
+      :css_compressor => :yui,
       :remove_intertag_spaces => false,
       :remove_quotes => false,
       :compress_javascript => false,
@@ -126,11 +137,42 @@ module HtmlCompressor
 
       @options = DEFAULT_OPTIONS.merge(options)
 
-      # YUICompressor settings
-      @yuiCssLineBreak = -1
-      @yuiJsNoMunge = false
-      @yuiJsPreserveAllSemiColons = false
-      @yuiJsDisableOptimizations = false
+      detect_external_compressors
+    end
+
+    def detect_external_compressors
+      @javascript_compressors = {}
+      @css_compressors = {}
+
+      # Try Closure.
+      begin
+        require 'closure-compiler'
+        @javascript_compressors[:closure] = Closure::Compiler
+      rescue LoadError
+      end
+
+      # Try YUI
+      begin
+        require 'yui/compressor'
+        @javascript_compressors[:yui] = YUI::JavaScriptCompressor
+        @css_compressors[:yui] = YUI::CssCompressor
+      rescue LoadError
+      end
+    end
+
+    def get_javascript_compressor(compressor_name)
+
+      if @javascript_compressors.has_key? compressor_name
+        @javascript_compressors[compressor_name].new JAVASCRIPT_COMPRESSORS_OPTIONS[compressor_name]
+      end
+
+    end
+
+    def get_css_compressor(compressor_name)
+
+      if @css_compressors.has_key? compressor_name
+        @css_compressors[compressor_name].new CSS_COMPRESSORS_OPTIONS[compressor_name]
+      end
 
     end
 
@@ -465,15 +507,14 @@ module HtmlCompressor
 
     def compress_javascript(source)
       # set default javascript compressor
-      javaScriptCompressor = @options[:javascript_compressor]
+      javascript_compressor = @options[:javascript_compressor]
 
-      if javaScriptCompressor.nil?
-        javaScriptCompressor = YUI::JavaScriptCompressor.new(
-          :munge => !@yuiJsNoMunge,
-          :preserve_semicolons => !@yuiJsDisableOptimizations,
-          :optimize => !@yuiJsDisableOptimizations,
-          :line_break => @yuiJsLineBreak
-        )
+      if javascript_compressor.is_a?(Symbol)
+        javascript_compressor = get_javascript_compressor(javascript_compressor)
+      end
+
+      if javascript_compressor.nil?
+        raise MissingCompressorError, "No JavaScript Compressor. Please set the :javascript_compressor option"
       end
 
       # detect CDATA wrapper
@@ -483,7 +524,7 @@ module HtmlCompressor
         source = $1
       end
 
-      result = javaScriptCompressor.compress(source).strip
+      result = javascript_compressor.compress(source).strip
 
       if cdataWrapper
         result = "<![CDATA[" + result + "]]>"
@@ -494,10 +535,14 @@ module HtmlCompressor
 
     def compress_css_styles(source)
       # set default css compressor
-      cssCompressor = @options[:css_compressor]
+      css_compressor = @options[:css_compressor]
 
-      if cssCompressor.nil?
-        cssCompressor = YUI::CssCompressor.new(:line_break => @yuiCssLineBreak)
+      if css_compressor.is_a?(Symbol)
+        css_compressor = get_css_compressor(css_compressor)
+      end
+
+      if css_compressor.nil?
+        raise MissingCompressorError, "No CSS Compressor. Please set the :css_compressor option"
       end
 
       # detect CDATA wrapper
@@ -507,7 +552,7 @@ module HtmlCompressor
         source = $1
       end
 
-      result = cssCompressor.compress(source)
+      result = css_compressor.compress(source)
 
       if cdataWrapper
         result = "<![CDATA[" + result + "]]>"
